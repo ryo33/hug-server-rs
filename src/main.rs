@@ -23,7 +23,7 @@ async fn main() -> shuttle_axum::ShuttleAxum {
     let state = State::default();
 
     let router = Router::new()
-        .route("/socket", get(socket_handler))
+        .route("/websocket", get(socket_handler))
         .layer(Extension(state));
 
     Ok(router.into())
