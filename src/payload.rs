@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum HugCommand {
     JoinRoom { key: String },
@@ -10,7 +10,7 @@ pub enum HugCommand {
     Push { payload: Payload },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum HugEvent {
     Joined { is_primary: bool },
@@ -19,7 +19,7 @@ pub enum HugEvent {
     Push { payload: Payload },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum Payload {
     HandControl {
         left: Vec2,

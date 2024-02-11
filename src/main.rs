@@ -13,10 +13,10 @@ use axum::{
     Extension, Router,
 };
 use client::Client;
-use futures::{Sink, SinkExt as _, StreamExt as _};
+use futures::{SinkExt as _, StreamExt as _};
 use state::State;
 
-use crate::payload::{HugCommand, HugEvent};
+use crate::payload::HugCommand;
 
 #[shuttle_runtime::main]
 async fn main() -> shuttle_axum::ShuttleAxum {
@@ -37,39 +37,47 @@ async fn socket_handler(
 }
 
 async fn websocket(stream: WebSocket, state: State) {
-    let (ws_sender, mut ws_receiver) = stream.split();
-    let mut client = Client {
-        state_ref: state.clone(),
-        message_socket: None,
-        ws_sender: Box::pin(ws_sender.with(|event: HugEvent| async move {
-            Ok(WsMessage::Text(serde_json::to_string(&event).unwrap()))
-        })),
-    };
+    let (mut ws_sender, mut ws_receiver) = stream.split();
+    let (tx, mut rx) = channel::ws_bridge();
     tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                ws_message = ws_receiver.next() => {
-                    match handle_ws_message(ws_message, &mut client).await {
-                        Ok(Loop::Continue) => continue,
-                        Ok(Loop::Break) => break,
-                        Err(error) => {
-                            tracing::error!("handle_ws_message error: {}", error);
-                            break;
-                        }
-                    }
-                },
-                message = client.recv_message() => {
-                    match client.handle_message(message).await {
-                        Ok(()) => continue,
-                        Err(error) => {
-                            tracing::error!("handle_message error: {}", error);
-                            break;
-                        }
-                    }
-                },
-            };
+        while let Some(event) = rx.recv().await {
+            if let Err(err) = ws_sender
+                .send(WsMessage::Text(serde_json::to_string(&event).unwrap()))
+                .await
+            {
+                tracing::error!("websocket send error: {}", err);
+            }
         }
+        tracing::info!("websocket send loop ended");
     });
+    let mut client = Client {
+        state: state.clone(),
+        message_socket: None,
+        event_sender: tx,
+    };
+    loop {
+        tokio::select! {
+            ws_message = ws_receiver.next() => {
+                match handle_ws_message(ws_message, &mut client).await {
+                    Ok(Loop::Continue) => continue,
+                    Ok(Loop::Break) => break,
+                    Err(error) => {
+                        tracing::error!("handle_ws_message error: {}", error);
+                        break;
+                    }
+                }
+            },
+            message = client.recv_message() => {
+                match client.handle_message(message).await {
+                    Ok(()) => continue,
+                    Err(error) => {
+                        tracing::error!("handle_message error: {}", error);
+                        break;
+                    }
+                }
+            },
+        };
+    }
 }
 
 enum Loop {
@@ -77,9 +85,9 @@ enum Loop {
     Break,
 }
 
-async fn handle_ws_message<T: Sink<HugEvent, Error = axum::Error> + Unpin>(
+async fn handle_ws_message(
     ws_message: Option<Result<WsMessage, axum::Error>>,
-    client: &mut Client<T>,
+    client: &mut Client,
 ) -> anyhow::Result<Loop> {
     match ws_message {
         Some(Ok(WsMessage::Text(text))) => {

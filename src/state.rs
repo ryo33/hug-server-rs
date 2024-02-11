@@ -21,19 +21,25 @@ pub struct RandomMatching {
 }
 
 impl RandomMatching {
+    #[tracing::instrument(err, skip(self))]
     pub async fn join_random(&mut self) -> anyhow::Result<MessageSocket> {
         if let Some(wait) = self.waiting.take() {
-            wait.join_notifier.send(Message::Joined).await?;
-            wait.socket.sender.send(Message::Joined).await?;
-            Ok(wait.socket)
-        } else {
-            let (mine, theirs) = message_sockets();
-            self.waiting = Some(MatchWait {
-                socket: theirs,
-                join_notifier: mine.sender.clone(),
-            });
-            Ok(mine)
+            if let Err(err) = wait.join_notifier.send(Message::Joined).await {
+                tracing::info!("join_notifier send error: {}", err);
+                // The other side has gone away, so new one be the waiting one.
+            } else {
+                tracing::info!("matched with random player");
+                wait.socket.sender.send(Message::Joined).await?;
+                return Ok(wait.socket);
+            }
         }
+        tracing::info!("waiting for random player");
+        let (mine, theirs) = message_sockets();
+        self.waiting = Some(MatchWait {
+            socket: theirs,
+            join_notifier: mine.sender.clone(),
+        });
+        Ok(mine)
     }
 }
 
@@ -48,10 +54,12 @@ pub struct MatchWait {
 }
 
 impl State {
+    #[tracing::instrument(skip(self))]
     pub async fn find_room(&self, key: Uuid) -> Option<MessageSocket> {
         self.key_matching.key_registry.remove(&key).await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn create_room(&self) -> (Uuid, MessageSocket) {
         let key = Uuid::new_v4();
         let (mine, theirs) = message_sockets();

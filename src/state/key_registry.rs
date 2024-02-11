@@ -21,12 +21,14 @@ impl KeyRegistry {
         }
     }
 
+    #[tracing::instrument(skip(self, socket))]
     pub async fn insert(&self, key: Uuid, socket: MessageSocket) {
         self.map
             .insert(key, Arc::new(Mutex::new(Some(socket))))
             .await;
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn remove(&self, key: &Uuid) -> Option<MessageSocket> {
         self.map.remove(key).await.and_then(|arc| arc.lock().take())
     }
